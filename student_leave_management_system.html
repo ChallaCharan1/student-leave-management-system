@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Leave Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, createContext, useContext } = React;
+
+        // --- MOCK POSTGRESQL & BACKEND SIMULATION STORE ---
+        const INITIAL_DEPARTMENTS = [
+            { id: 1, name: 'Computer Science & Engineering', code: 'CSE', hod_id: 3 },
+            { id: 2, name: 'Electronics & Communication', code: 'ECE', hod_id: 4 },
+            { id: 3, name: 'Mechanical Engineering', code: 'MECH', hod_id: 5 }
+        ];
+
+        const INITIAL_USERS = [
+            { id: 1, name: 'Alex Johnson', email: 'student@example.com', password_hash: '$2b$10$hashed_student_pass', role: 'STUDENT', student_id: 'CS2026-089', department_id: 1, created_at: '2026-01-10T08:00:00Z' },
+            { id: 2, name: 'Prof. Sarah Jenkins', email: 'faculty@example.com', password_hash: '$2b$10$hashed_faculty_pass', role: 'FACULTY', student_id: null, department_id: 1, created_at: '2025-08-15T09:30:00Z' },
+            { id: 3, name: 'Dr. Robert Miller', email: 'hod@example.com', password_hash: '$2b$10$hashed_hod_pass', role: 'HOD', student_id: null, department_id: 1, created_at: '2024-03-01T10:00:00Z' },
+            { id: 4, name: 'Samantha Reed', email: 'student2@example.com', password_hash: '$2b$10$hashed_student2_pass', role: 'STUDENT', student_id: 'EC2026-014', department_id: 2, created_at: '2026-02-01T08:00:00Z' }
+        ];
+
+        const INITIAL_LEAVES = [
+            {
+                id: 101,
+                student_id: 1,
+                department_id: 1,
+                from_date: '2026-10-12',
+                to_date: '2026-10-14',
+                number_of_days: 3,
+                leave_type: 'Casual Leave',
+                reason: 'Attending cousin wedding ceremony in hometown.',
+                faculty_status: 'APPROVED',
+                faculty_comment: 'Recommended based on academic attendance history.',
+                faculty_action_at: '2026-10-02T11:20:00Z',
+                hod_status: 'APPROVED',
+                hod_comment: 'Approved. Make up missed lab work upon return.',
+                hod_action_at: '2026-10-03T14:15:00Z',
+                final_status: 'APPROVED',
+                created_at: '2026-10-01T09:00:00Z',
+                updated_at: '2026-10-03T14:15:00Z'
+            },
+            {
+                id: 102,
+                student_id: 1,
+                department_id: 1,
+                from_date: '2026-10-18',
+                to_date: '2026-10-20',
+                number_of_days: 3,
+                leave_type: 'Medical Leave',
+                reason: 'Severe viral fever and physician recommended bed rest.',
+                faculty_status: 'APPROVED',
+                faculty_comment: 'Medical certificate attached and verified.',
+                faculty_action_at: '2026-10-05T08:30:00Z',
+                hod_status: 'PENDING',
+                hod_comment: null,
+                hod_action_at: null,
+                final_status: 'HOD_PENDING',
+                created_at: '2026-10-04T16:45:00Z',
+                updated_at: '2026-10-05T08:30:00Z'
+            },
+            {
+                id: 103,
+                student_id: 1,
+                department_id: 1,
+                from_date: '2026-10-25',
+                to_date: '2026-10-26',
+                number_of_days: 2,
+                leave_type: 'Emergency Leave',
+                reason: 'Urgent family emergency requirement.',
+                faculty_status: 'PENDING',
+                faculty_comment: null,
+                faculty_action_at: null,
+                hod_status: 'PENDING',
+                hod_comment: null,
+                hod_action_at: null,
+                final_status: 'FACULTY_PENDING',
+                created_at: '2026-10-06T07:12:00Z',
+                updated_at: '2026-10-06T07:12:00Z'
+            }
+        ];
+
+        // Global Context
+        const AppContext = createContext();
+
+        function App() {
+            const [users, setUsers] = useState(() => JSON.parse(localStorage.getItem('slms_users')) || INITIAL_USERS);
+            const [leaves, setLeaves] = useState(() => JSON.parse(localStorage.getItem('slms_leaves')) || INITIAL_LEAVES);
+            const [departments] = useState(INITIAL_DEPARTMENTS);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [sqlLogs, setSqlLogs] = useState([]);
+            const [notifications, setNotifications] = useState([]);
+            const [activeView, setActiveView] = useState('app'); // 'app' or 'code'
+
+            useEffect(() => {
+                localStorage.setItem('slms_users', JSON.stringify(users));
+            }, [users]);
+
+            useEffect(() => {
+                localStorage.setItem('slms_leaves', JSON.stringify(leaves));
+            }, [leaves]);
+
+            const logSQL = (query, params = []) => {
+                const timestamp = new Date().toLocaleTimeString();
+                setSqlLogs(prev => [{ id: Date.now(), query, params, timestamp }, ...prev.slice(0, 49)]);
+            };
+
+            const addNotification = (message, type = 'info') => {
+                const id = Date.now();
+                setNotifications(prev => [...prev, { id, message, type }]);
+                setTimeout(() => {
+                    setNotifications(prev => prev.filter(n => n.id !== id));
+                }, 4000);
+            };
+
+            // Authentication API Handler
+            const login = (email, password) => {
+                logSQL("SELECT * FROM users WHERE email = $1 LIMIT 1;", [email]);
+                const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+                if (user) {
+                    // Password verification simulated
+                    setCurrentUser(user);
+                    setActiveTab('dashboard');
+                    addNotification(`Welcome back, ${user.name}! Connected as ${user.role}.`, 'success');
+                    return { success: true, user };
+                }
+                return { success: false, message: 'Invalid credentials provided.' };
+            };
+
+            const logout = () => {
+                setCurrentUser(null);
+                addNotification('Logged out successfully from session.', 'info');
+            };
+
+            // Calculate leave days helper
+            const calculateDays = (start, end) => {
+                if (!start || !end) return 0;
+                const s = new Date(start);
+                const e = new Date(end);
+                const diffTime = e.getTime() - s.getTime();
+                if (diffTime < 0) return 0;
+                return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            };
+
+            // Leave Submission Action
+            const submitLeave = (leaveData) => {
+                const days = calculateDays(leaveData.fromDate, leaveData.toDate);
+                if (days <= 0) {
+                    addNotification('From date cannot be after To date!', 'error');
+                    return false;
+                }
+
+                // Check overlap
+                const overlap = leaves.some(l => 
+                    l.student_id === currentUser.id && 
+                    l.final_status !== 'REJECTED' &&
+                    ((leaveData.fromDate >= l.from_date && leaveData.fromDate <= l.to_date) ||
+                     (leaveData.toDate >= l.from_date && leaveData.toDate <= l.to_date))
+                );
+
+                if (overlap) {
+                    addNotification('An active or pending leave application already exists for these dates.', 'error');
+                    return false;
+                }
+
+                const newLeave = {
+                    id: Date.now(),
+                    student_id: currentUser.id,
+                    department_id: currentUser.department_id,
+                    from_date: leaveData.fromDate,
+                    to_date: leaveData.toDate,
+                    number_of_days: days,
+                    leave_type: leaveData.leaveType,
+                    reason: leaveData.reason,
+                    faculty_status: 'PENDING',
+                    faculty_comment: null,
+                    faculty_action_at: null,
+                    hod_status: 'PENDING',
+                    hod_comment: null,
+                    hod_action_at: null,
+                    final_status: 'FACULTY_PENDING',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                };
+
+                logSQL(`INSERT INTO leave_applications (student_id, department_id, from_date, to_date, number_of_days, leave_type, reason, final_status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'FACULTY_PENDING') RETURNING *;`, 
+                    [currentUser.id, currentUser.department_id, leaveData.fromDate, leaveData.toDate, days, leaveData.leaveType, leaveData.reason]);
+
+                setLeaves(prev => [newLeave, ...prev]);
+                addNotification('Leave application submitted successfully. Current Status: FACULTY_PENDING', 'success');
+                setActiveTab('history');
+                return true;
+            };
+
+            // Faculty Actions
+            const facultyApprove = (leaveId, comment) => {
+                logSQL(`UPDATE leave_applications SET faculty_status = 'APPROVED', faculty_comment = $1, faculty_action_at = NOW(), final_status = 'HOD_PENDING', updated_at = NOW() WHERE id = $2;`, [comment, leaveId]);
+                
+                setLeaves(prev => prev.map(l => {
+                    if (l.id === leaveId) {
+                        return {
+                            ...l,
+                            faculty_status: 'APPROVED',
+                            faculty_comment: comment || 'Faculty recommendation recorded.',
+                            faculty_action_at: new Date().toISOString(),
+                            final_status: 'HOD_PENDING',
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                    return l;
+                }));
+                addNotification('Leave application approved & forwarded to HOD for final sign-off.', 'success');
+            };
+
+            const facultyReject = (leaveId, comment) => {
+                if (!comment || !comment.trim()) {
+                    addNotification('A rejection reason is strictly required by faculty policy.', 'error');
+                    return false;
+                }
+                logSQL(`UPDATE leave_applications SET faculty_status = 'REJECTED', faculty_comment = $1, faculty_action_at = NOW(), final_status = 'REJECTED', updated_at = NOW() WHERE id = $2;`, [comment, leaveId]);
+
+                setLeaves(prev => prev.map(l => {
+                    if (l.id === leaveId) {
+                        return {
+                            ...l,
+                            faculty_status: 'REJECTED',
+                            faculty_comment: comment,
+                            faculty_action_at: new Date().toISOString(),
+                            final_status: 'REJECTED',
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                    return l;
+                }));
+                addNotification('Leave application marked as REJECTED by Faculty.', 'info');
+                return true;
+            };
+
+            // HOD Actions
+            const hodApprove = (leaveId, comment) => {
+                logSQL(`UPDATE leave_applications SET hod_status = 'APPROVED', hod_comment = $1, hod_action_at = NOW(), final_status = 'APPROVED', updated_at = NOW() WHERE id = $2;`, [comment, leaveId]);
+
+                setLeaves(prev => prev.map(l => {
+                    if (l.id === leaveId) {
+                        return {
+                            ...l,
+                            hod_status: 'APPROVED',
+                            hod_comment: comment || 'HOD final authorization granted.',
+                            hod_action_at: new Date().toISOString(),
+                            final_status: 'APPROVED',
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                    return l;
+                }));
+                addNotification('Leave application FINAL APPROVED.', 'success');
+            };
+
+            const hodReject = (leaveId, comment) => {
+                if (!comment || !comment.trim()) {
+                    addNotification('A rejection reason is strictly required by HOD policy.', 'error');
+                    return false;
+                }
+                logSQL(`UPDATE leave_applications SET hod_status = 'REJECTED', hod_comment = $1, hod_action_at = NOW(), final_status = 'REJECTED', updated_at = NOW() WHERE id = $2;`, [comment, leaveId]);
+
+                setLeaves(prev => prev.map(l => {
+                    if (l.id === leaveId) {
+                        return {
+                            ...l,
+                            hod_status: 'REJECTED',
+                            hod_comment: comment,
+                            hod_action_at: new Date().toISOString(),
+                            final_status: 'REJECTED',
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                    return l;
+                }));
+                addNotification('Leave application FINAL REJECTED by HOD.', 'info');
+                return true;
+            };
+
+            return (
+                <AppContext.Provider value={{
+                    users, leaves, departments, currentUser, activeTab, setActiveTab,
+                    login, logout, submitLeave, facultyApprove, facultyReject, hodApprove, hodReject,
+                    sqlLogs, calculateDays, activeView, setActiveView
+                }}>
+                    <div className="flex flex-col min-h-screen bg-slate-900 text-slate-100">
+                        {/* Top System Navigation Header */}
+                        <header className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap justify-between items-center z-20">
+                            <div className="flex items-center space-x-3">
+                                <div className="bg-indigo-600 p-2 rounded-lg text-white font-bold flex items-center justify-center w-10 h-10 shadow-lg">
+                                    <i className="fas fa-graduation-cap text-xl"></i>
+                                </div>
+                                <div>
+                                    <h1 className="font-bold text-lg leading-tight tracking-wide text-white">AcademiaLeave Enterprise</h1>
+                                    <p className="text-xs text-slate-400">PostgreSQL + Express.js Web Engine Simulation</p>
+                                </div>
+                            </div>
+
+                            {/* View Mode Toggle: Application vs Code Inspector */}
+                            <div className="flex items-center space-x-2 bg-slate-950 p-1 rounded-xl border border-slate-800 my-2 sm:my-0">
+                                <button
+                                    onClick={() => setActiveView('app')}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+                                        activeView === 'app' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    <i className="fas fa-desktop"></i>
+                                    <span>Interactive Portals</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('code')}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+                                        activeView === 'code' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    <i className="fas fa-code"></i>
+                                    <span>Project Workspace Files</span>
+                                </button>
+                            </div>
+
+                            {/* User Status Bar */}
+                            {currentUser ? (
+                                <div className="flex items-center space-x-3">
+                                    <div className="text-right hidden sm:block">
+                                        <p className="text-sm font-semibold text-slate-200">{currentUser.name}</p>
+                                        <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                            currentUser.role === 'STUDENT' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                                            currentUser.role === 'FACULTY' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                                            'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                        }`}>
+                                            {currentUser.role} PORTAL
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={logout}
+                                        className="bg-slate-700 hover:bg-rose-600 text-slate-200 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center space-x-1"
+                                    >
+                                        <i className="fas fa-sign-out-alt"></i>
+                                        <span>Logout</span>
+                                    </button>
+                                </div>
+                            ) : (
+                                <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-1 rounded-full flex items-center space-x-1">
+                                    <i className="fas fa-key text-[10px]"></i>
+                                    <span>Authentication Required</span>
+                                </span>
+                            )}
+                        </header>
+
+                        {/* Notifications Overlay */}
+                        <div className="fixed top-16 right-4 z-50 flex flex-col space-y-2 max-w-sm pointer-events-none">
+                            {notifications.map(n => (
+                                <div
+                                    key={n.id}
+                                    className={`pointer-events-auto p-3 rounded-lg shadow-xl text-xs font-medium flex items-center justify-between border ${
+                                        n.type === 'success' ? 'bg-emerald-900/90 text-emerald-100 border-emerald-600' :
+                                        n.type === 'error' ? 'bg-rose-900/90 text-rose-100 border-rose-600' :
+                                        'bg-sky-900/90 text-sky-100 border-sky-600'
+                                    }`}
+                                >
+                                    <span className="mr-2">{n.message}</span>
+                                    <i className={`fas ${
+                                        n.type === 'success' ? 'fa-check-circle' : n.type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'
+                                    }`}></i>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Main Interface Content */}
+                        <div className="flex-1 flex flex-col">
+                            {activeView === 'app' ? (
+                                currentUser ? <PortalLayout /> : <LoginScreen />
+                            ) : (
+                                <ProjectCodeExplorer />
+                            )}
+                        </div>
+
+                        {/* Database Query Inspector Footer Log */}
+                        <DatabaseInspector logs={sqlLogs} />
+                    </div>
+                </AppContext.Provider>
+            );
+        }
+
+        function LoginScreen() {
+            const { login } = useContext(AppContext);
+            const [email, setEmail] = useState('student@example.com');
+            const [password, setPassword] = useState('password123');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                login(email, password);
+            };
+
+            const selectDemoAccount = (accEmail) => {
+                setEmail(accEmail);
+                login(accEmail, 'password123');
+            };
+
+            return (
+                <div className="flex-1 flex items-center justify-center p-4 bg-slate-950 relative overflow-hidden">
+                    {/* Background glow effects */}
+                    <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
+                    <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                    <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 z-10">
+                        <div className="text-center mb-6">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-400 mb-3 border border-indigo-500/30">
+                                <i className="fas fa-university text-2xl"></i>
+                            </div>
+                            <h2 className="text-2xl font-bold text-white tracking-tight">Portal Single Sign-On</h2>
+                            <p className="text-xs text-slate-400 mt-1">Student Leave Management System System Authenticator</p>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">Institutional Email</label>
+                                <div className="relative">
+                                    <i className="fas fa-envelope absolute left-3 top-3 text-slate-500 text-xs"></i>
+                                    <input
+                                        type="email"
+                                        required
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="user@college.edu"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                                <div className="relative">
+                                    <i className="fas fa-lock absolute left-3 top-3 text-slate-500 text-xs"></i>
+                                    <input
+                                        type="password"
+                                        required
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                            </div>
+
+                            <button
+                                type="submit"
+                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2.5 rounded-lg text-sm transition-colors shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2"
+                            >
+                                <span>Sign In to Dashboard</span>
+                                <i className="fas fa-arrow-right text-xs"></i>
+                            </button>
+                        </form>
+
+                        <div className="mt-8 pt-6 border-t border-slate-800">
+                            <p className="text-xs font-semibold text-slate-400 mb-3 text-center uppercase tracking-wider">Quick Demo Login Shortcuts</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button
+                                    onClick={() => selectDemoAccount('student@example.com')}
+                                    className="p-2.5 bg-slate-800/80 hover:bg-blue-600/20 hover:border-blue-500/50 border border-slate-700 rounded-xl transition-all text-center group"
+                                >
+                                    <i className="fas fa-user-graduate text-blue-400 group-hover:scale-110 transition-transform mb-1 block"></i>
+                                    <span className="text-[11px] font-medium text-slate-300 block">Student</span>
+                                </button>
+                                <button
+                                    onClick={() => selectDemoAccount('faculty@example.com')}
+                                    className="p-2.5 bg-slate-800/80 hover:bg-purple-600/20 hover:border-purple-500/50 border border-slate-700 rounded-xl transition-all text-center group"
+                                >
+                                    <i className="fas fa-chalkboard-teacher text-purple-400 group-hover:scale-110 transition-transform mb-1 block"></i>
+                                    <span className="text-[11px] font-medium text-slate-300 block">Faculty</span>
+                                </button>
+                                <button
+                                    onClick={() => selectDemoAccount('hod@example.com')}
+                                    className="p-2.5 bg-slate-800/80 hover:bg-emerald-600/20 hover:border-emerald-500/50 border border-slate-700 rounded-xl transition-all text-center group"
+                                >
+                                    <i className="fas fa-user-shield text-emerald-400 group-hover:scale-110 transition-transform mb-1 block"></i>
+                                    <span className="text-[11px] font-medium text-slate-300 block">HOD</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PortalLayout() {
+            const { currentUser, activeTab, setActiveTab } = useContext(AppContext);
+
+            const studentNav = [
+                { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
+                { id: 'apply', label: 'Apply Leave', icon: 'fa-paper-plane' },
+                { id: 'history', label: 'My Applications', icon: 'fa-history' },
+                { id: 'profile', label: 'My Profile', icon: 'fa-user-circle' }
+            ];
+
+            const facultyNav = [
+                { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
+                { id: 'pending', label: 'Pending Approvals', icon: 'fa-clock' },
+                { id: 'history', label: 'All Reviews', icon: 'fa-list-check' }
+            ];
+
+            const hodNav = [
+                { id: 'dashboard', label: 'Department Analytics', icon: 'fa-chart-bar' },
+                { id: 'pending', label: 'HOD Approvals', icon: 'fa-signature' },
+                { id: 'all_leaves', label: 'Department Leaves', icon: 'fa-building' }
+            ];
+
+            const currentNav = currentUser.role === 'STUDENT' ? studentNav :
+                              currentUser.role === 'FACULTY' ? facultyNav : hodNav;
+
+            return (
+                <div className="flex-1 flex flex-col md:flex-row bg-slate-950">
+                    {/* Sidebar Navigation */}
+                    <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0">
+                        <div className="p-4">
+                            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-3">
+                                {currentUser.role} Menu
+                            </div>
+                            <nav className="space-y-1">
+                                {currentNav.map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setActiveTab(item.id)}
+                                        className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                                            activeTab === item.id
+                                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                        }`}
+                                    >
+                                        <i className={`fas ${item.icon} text-base w-5 text-center`}></i>
+                                        <span>{item.label}</span>
+                                    </button>
+                                ))}
+                            </nav>
+                        </div>
+
+                        <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+                            <div className="flex items-center space-x-3">
+                                <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-indigo-400">
+                                    {currentUser.name.charAt(0)}
+                                </div>
+                                <div className="overflow-hidden">
+                                    <p className="text-xs font-medium text-slate-200 truncate">{currentUser.name}</p>
+                                    <p className="text-[10px] text-slate-500 truncate">{currentUser.email}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+
+                    {/* Dynamic Portal View Container */}
+                    <main className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+                        {currentUser.role === 'STUDENT' && <StudentPortal />}
+                        {currentUser.role === 'FACULTY' && <FacultyPortal />}
+                        {currentUser.role === 'HOD' && <HodPortal />}
+                    </main>
+                </div>
+            );
+        }
+
+        function StudentPortal() {
+            const { activeTab, leaves, currentUser, submitLeave, calculateDays, departments } = useContext(AppContext);
+            
+            // Student Specific Data Filtering
+            const myLeaves = useMemo(() => {
+                return leaves.filter(l => l.student_id === currentUser.id);
+            }, [leaves, currentUser]);
+
+            const approvedLeavesCount = useMemo(() => {
+                return myLeaves.filter(l => l.final_status === 'APPROVED')
+                               .reduce((acc, l) => acc + l.number_of_days, 0);
+            }, [myLeaves]);
+
+            const pendingCount = myLeaves.filter(l => l.final_status.includes('PENDING')).length;
+            const approvedCount = myLeaves.filter(l => l.final_status === 'APPROVED').length;
+            const rejectedCount = myLeaves.filter(l => l.final_status === 'REJECTED').length;
+
+            const dept = departments.find(d => d.id === currentUser.department_id);
+
+            // Leave Form State
+            const [formData, setFormData] = useState({
+                fromDate: '',
+                toDate: '',
+                leaveType: 'Casual Leave',
+                reason: ''
+            });
+
+            const handleFormSubmit = (e) => {
+                e.preventDefault();
+                const success = submitLeave(formData);
+                if (success) {
+                    setFormData({ fromDate: '', toDate: '', leaveType: 'Casual Leave', reason: '' });
+                }
+            };
+
+            const computedDays = calculateDays(formData.fromDate, formData.toDate);
+
+            return (
+                <div className="space-y-6 max-w-6xl mx-auto">
+                    {activeTab === 'dashboard' && (
+                        <>
+                            {/* Header Info */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">Student Dashboard</h2>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        ID: <span className="text-indigo-400 font-mono font-semibold">{currentUser.student_id}</span> | Department: <span className="text-slate-200">{dept?.name} ({dept?.code})</span>
+                                    </p>
+                                </div>
+                                <div className="bg-emerald-500/10 border border-emerald-500/30 px-4 py-2 rounded-xl text-emerald-400 flex items-center space-x-3">
+                                    <i className="fas fa-calendar-check text-2xl"></i>
+                                    <div>
+                                        <p className="text-[10px] uppercase font-bold tracking-wider text-emerald-500/80">Approved Leaves Taken</p>
+                                        <p className="text-xl font-black text-emerald-400">{approvedLeavesCount} <span className="text-xs font-normal text-emerald-300">Days</span></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Stat Cards */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <StatCard title="Total Applications" value={myLeaves.length} icon="fa-folder" color="blue" />
+                                <StatCard title="Pending Workflow" value={pendingCount} icon="fa-clock" color="amber" />
+                                <StatCard title="Approved Leaves" value={approvedCount} icon="fa-check-circle" color="emerald" />
+                                <StatCard title="Rejected Requests" value={rejectedCount} icon="fa-times-circle" color="rose" />
+                            </div>
+
+                            {/* Recent Activity Table */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                                <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                                    <i className="fas fa-history text-indigo-400"></i>
+                                    <span>Recent Leave Submissions</span>
+                                </h3>
+                                <LeaveTable leaves={myLeaves.slice(0, 5)} showStudent={false} />
+                            </div>
+                        </>
+                    )}
+
+                    {activeTab === 'apply' && (
+                        <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                            <h3 className="text-lg font-bold text-white mb-1">Submit New Leave Application</h3>
+                            <p className="text-xs text-slate-400 mb-6">Application will undergo automated Faculty endorsement followed by HOD approval.</p>
+
+                            <form onSubmit={handleFormSubmit} className="space-y-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">From Date</label>
+                                        <input
+                                            type="date"
+                                            required
+                                            value={formData.fromDate}
+                                            onChange={e => setFormData({ ...formData, fromDate: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">To Date</label>
+                                        <input
+                                            type="date"
+                                            required
+                                            value={formData.toDate}
+                                            onChange={e => setFormData({ ...formData, toDate: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                {computedDays > 0 && (
+                                    <div className="p-3 bg-indigo-950/50 border border-indigo-500/30 rounded-xl flex items-center justify-between text-xs">
+                                        <span className="text-slate-300">Total Leave Duration Calculated:</span>
+                                        <span className="font-bold text-indigo-400 text-sm">{computedDays} Day(s)</span>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">Leave Category</label>
+                                    <select
+                                        value={formData.leaveType}
+                                        onChange={e => setFormData({ ...formData, leaveType: e.target.value })}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="Casual Leave">Casual Leave</option>
+                                        <option value="Medical Leave">Medical Leave</option>
+                                        <option value="Emergency Leave">Emergency Leave</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">Reason for Leave</label>
+                                    <textarea
+                                        required
+                                        rows="4"
+                                        value={formData.reason}
+                                        onChange={e => setFormData({ ...formData, reason: e.target.value })}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        placeholder="Detailed reason for absence request..."
+                                    ></textarea>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">Supporting Attachment (Optional)</label>
+                                    <div className="border-2 border-dashed border-slate-800 rounded-xl p-4 text-center hover:border-slate-700 transition-colors cursor-pointer bg-slate-950">
+                                        <i className="fas fa-file-upload text-xl text-slate-500 mb-1"></i>
+                                        <p className="text-xs text-slate-400">Click or drag medical certificate / official note here</p>
+                                        <p className="text-[10px] text-slate-600 mt-1">PDF, PNG, JPG up to 5MB</p>
+                                    </div>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-xl text-sm transition-colors shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2"
+                                >
+                                    <i className="fas fa-paper-plane text-xs"></i>
+                                    <span>Submit Application to Faculty Workflow</span>
+                                </button>
+                            </form>
+                        </div>
+                    )}
+
+                    {activeTab === 'history' && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                                <i className="fas fa-history text-indigo-400"></i>
+                                <span>Complete Leave Application History</span>
+                            </h3>
+                            <LeaveTable leaves={myLeaves} showStudent={false} />
+                        </div>
+                    )}
+
+                    {activeTab === 'profile' && (
+                        <div className="max-w-md mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                            <div className="text-center mb-6">
+                                <div className="w-20 h-20 rounded-full bg-indigo-600/20 border-2 border-indigo-500 text-indigo-400 flex items-center justify-center font-bold text-2xl mx-auto mb-3">
+                                    {currentUser.name.charAt(0)}
+                                </div>
+                                <h3 className="font-bold text-lg text-white">{currentUser.name}</h3>
+                                <p className="text-xs text-slate-400">{currentUser.email}</p>
+                            </div>
+
+                            <div className="space-y-3 text-xs divide-y divide-slate-800">
+                                <div className="pt-2 flex justify-between">
+                                    <span className="text-slate-500">Student Roll / ID</span>
+                                    <span className="font-mono font-semibold text-slate-200">{currentUser.student_id}</span>
+                                </div>
+                                <div className="pt-2 flex justify-between">
+                                    <span className="text-slate-500">Department</span>
+                                    <span className="text-slate-200">{dept?.name}</span>
+                                </div>
+                                <div className="pt-2 flex justify-between">
+                                    <span className="text-slate-500">Account Role</span>
+                                    <span className="text-blue-400 font-bold">{currentUser.role}</span>
+                                </div>
+                                <div className="pt-2 flex justify-between">
+                                    <span className="text-slate-500">System Enrolled</span>
+                                    <span className="text-slate-400">{new Date(currentUser.created_at).toLocaleDateString()}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function FacultyPortal() {
+            const { activeTab, leaves, users, currentUser, facultyApprove, facultyReject } = useContext(AppContext);
+            const [selectedLeave, setSelectedLeave] = useState(null);
+            const [comment, setComment] = useState('');
+            const [actionType, setActionType] = useState(null);
+
+            // Filter leaves belonging to faculty department
+            const deptLeaves = useMemo(() => {
+                return leaves.filter(l => l.department_id === currentUser.department_id);
+            }, [leaves, currentUser]);
+
+            const pendingLeaves = deptLeaves.filter(l => l.final_status === 'FACULTY_PENDING');
+            const reviewedLeaves = deptLeaves.filter(l => l.faculty_status !== 'PENDING');
+
+            const handleActionClick = (leave, type) => {
+                setSelectedLeave(leave);
+                setActionType(type);
+                setComment('');
+            };
+
+            const handleConfirmAction = () => {
+                if (actionType === 'APPROVE') {
+                    facultyApprove(selectedLeave.id, comment);
+                    setSelectedLeave(null);
+                } else if (actionType === 'REJECT') {
+                    const ok = facultyReject(selectedLeave.id, comment);
+                    if (ok) setSelectedLeave(null);
+                }
+            };
+
+            return (
+                <div className="space-y-6 max-w-6xl mx-auto">
+                    {/* Header */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                        <h2 className="text-xl font-bold text-white">Faculty Endorsement Portal</h2>
+                        <p className="text-xs text-slate-400 mt-1">First-tier leave application verification for Department students.</p>
+                    </div>
+
+                    {/* Dashboard Summary Cards */}
+                    {activeTab === 'dashboard' && (
+                        <>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <StatCard title="Action Required" value={pendingLeaves.length} icon="fa-clock" color="amber" />
+                                <StatCard title="Reviewed by You" value={reviewedLeaves.length} icon="fa-check-double" color="indigo" />
+                                <StatCard title="Total Department Leaves" value={deptLeaves.length} icon="fa-folder-open" color="blue" />
+                                <StatCard title="Rejections" value={deptLeaves.filter(l => l.faculty_status === 'REJECTED').length} icon="fa-times-circle" color="rose" />
+                            </div>
+
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                                <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                                    <i className="fas fa-exclamation-circle text-amber-400"></i>
+                                    <span>Leaves Awaiting Faculty Review</span>
+                                </h3>
+                                <FacultyPendingTable
+                                    leaves={pendingLeaves}
+                                    users={users}
+                                    onAction={handleActionClick}
+                                />
+                            </div>
+                        </>
+                    )}
+
+                    {activeTab === 'pending' && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <h3 className="text-sm font-bold text-slate-200 mb-4">Pending Student Applications</h3>
+                            <FacultyPendingTable
+                                leaves={pendingLeaves}
+                                users={users}
+                                onAction={handleActionClick}
+                            />
+                        </div>
+                    )}
+
+                    {activeTab === 'history' && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <h3 className="text-sm font-bold text-slate-200 mb-4">Faculty Processed Review History</h3>
+                            <LeaveTable leaves={reviewedLeaves} showStudent={true} users={users} />
+                        </div>
+                    )}
+
+                    {/* Action Modal */}
+                    {selectedLeave && (
+                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+                                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                                    <h4 className="font-bold text-slate-200">
+                                        {actionType === 'APPROVE' ? 'Forward to HOD (Approve)' : 'Reject Leave Request'}
+                                    </h4>
+                                    <button onClick={() => setSelectedLeave(null)} className="text-slate-500 hover:text-white">
+                                        <i className="fas fa-times"></i>
+                                    </button>
+                                </div>
+
+                                <div className="text-xs space-y-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                    <p><strong className="text-slate-400">Reason:</strong> {selectedLeave.reason}</p>
+                                    <p><strong className="text-slate-400">Duration:</strong> {selectedLeave.from_date} to {selectedLeave.to_date} ({selectedLeave.number_of_days} Days)</p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Faculty Remark {actionType === 'REJECT' && <span className="text-rose-400">(Required)</span>}
+                                    </label>
+                                    <textarea
+                                        rows="3"
+                                        value={comment}
+                                        onChange={e => setComment(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        placeholder={actionType === 'APPROVE' ? 'e.g. Recommended for approval.' : 'State clear reason for rejection...'}
+                                    ></textarea>
+                                </div>
+
+                                <div className="flex justify-end space-x-2 pt-2">
+                                    <button
+                                        onClick={() => setSelectedLeave(null)}
+                                        className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleConfirmAction}
+                                        className={`px-4 py-2 rounded-xl text-xs font-medium text-white ${
+                                            actionType === 'APPROVE' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'
+                                        }`}
+                                    >
+                                        Confirm {actionType === 'APPROVE' ? 'Forward' : 'Reject'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function HodPortal() {
+            const { activeTab, leaves, users, currentUser, hodApprove, hodReject } = useContext(AppContext);
+            const [selectedLeave, setSelectedLeave] = useState(null);
+            const [comment, setComment] = useState('');
+            const [actionType, setActionType] = useState(null);
+
+            // Filter leaves for HOD department
+            const deptLeaves = useMemo(() => {
+                return leaves.filter(l => l.department_id === currentUser.department_id);
+            }, [leaves, currentUser]);
+
+            const hodPendingLeaves = deptLeaves.filter(l => l.final_status === 'HOD_PENDING');
+            const facultyPendingLeaves = deptLeaves.filter(l => l.final_status === 'FACULTY_PENDING');
+            const finalApprovedLeaves = deptLeaves.filter(l => l.final_status === 'APPROVED');
+            const finalRejectedLeaves = deptLeaves.filter(l => l.final_status === 'REJECTED');
+
+            const totalApprovedDaysCount = finalApprovedLeaves.reduce((acc, l) => acc + l.number_of_days, 0);
+
+            const handleActionClick = (leave, type) => {
+                setSelectedLeave(leave);
+                setActionType(type);
+                setComment('');
+            };
+
+            const handleConfirmAction = () => {
+                if (actionType === 'APPROVE') {
+                    hodApprove(selectedLeave.id, comment);
+                    setSelectedLeave(null);
+                } else if (actionType === 'REJECT') {
+                    const ok = hodReject(selectedLeave.id, comment);
+                    if (ok) setSelectedLeave(null);
+                }
+            };
+
+            return (
+                <div className="space-y-6 max-w-6xl mx-auto">
+                    {/* Header */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                        <h2 className="text-xl font-bold text-white">Head of Department (HOD) Portal</h2>
+                        <p className="text-xs text-slate-400 mt-1">Final decision authority & department-wide leave intelligence.</p>
+                    </div>
+
+                    {activeTab === 'dashboard' && (
+                        <>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                                <StatCard title="Total Department Requests" value={deptLeaves.length} icon="fa-folder" color="blue" />
+                                <StatCard title="Faculty Pending" value={facultyPendingLeaves.length} icon="fa-hourglass-start" color="amber" />
+                                <StatCard title="HOD Pending Authorization" value={hodPendingLeaves.length} icon="fa-signature" color="purple" />
+                                <StatCard title="Final Approved" value={finalApprovedLeaves.length} icon="fa-check-circle" color="emerald" />
+                                <StatCard title="Total Days Leave Taken" value={totalApprovedDaysCount} icon="fa-calendar-alt" color="teal" />
+                            </div>
+
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                                <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                                    <i className="fas fa-signature text-purple-400"></i>
+                                    <span>Leaves Awaiting Final HOD Sign-off</span>
+                                </h3>
+                                <HodPendingTable
+                                    leaves={hodPendingLeaves}
+                                    users={users}
+                                    onAction={handleActionClick}
+                                />
+                            </div>
+                        </>
+                    )}
+
+                    {activeTab === 'pending' && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <h3 className="text-sm font-bold text-slate-200 mb-4">HOD Action Queue</h3>
+                            <HodPendingTable
+                                leaves={hodPendingLeaves}
+                                users={users}
+                                onAction={handleActionClick}
+                            />
+                        </div>
+                    )}
+
+                    {activeTab === 'all_leaves' && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <h3 className="text-sm font-bold text-slate-200 mb-4">All Department Applications Log</h3>
+                            <LeaveTable leaves={deptLeaves} showStudent={true} users={users} />
+                        </div>
+                    )}
+
+                    {/* Action Modal */}
+                    {selectedLeave && (
+                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+                                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                                    <h4 className="font-bold text-slate-200">
+                                        {actionType === 'APPROVE' ? 'Grant Final Approval' : 'Reject Leave Request'}
+                                    </h4>
+                                    <button onClick={() => setSelectedLeave(null)} className="text-slate-500 hover:text-white">
+                                        <i className="fas fa-times"></i>
+                                    </button>
+                                </div>
+
+                                <div className="text-xs space-y-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                    <p><strong className="text-slate-400">Faculty Comment:</strong> {selectedLeave.faculty_comment || 'N/A'}</p>
+                                    <p><strong className="text-slate-400">Reason:</strong> {selectedLeave.reason}</p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        HOD Decision Remark {actionType === 'REJECT' && <span className="text-rose-400">(Required)</span>}
+                                    </label>
+                                    <textarea
+                                        rows="3"
+                                        value={comment}
+                                        onChange={e => setComment(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        placeholder={actionType === 'APPROVE' ? 'e.g. Final authorization granted.' : 'State explicit reason for rejection...'}
+                                    ></textarea>
+                                </div>
+
+                                <div className="flex justify-end space-x-2 pt-2">
+                                    <button
+                                        onClick={() => setSelectedLeave(null)}
+                                        className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleConfirmAction}
+                                        className={`px-4 py-2 rounded-xl text-xs font-medium text-white ${
+                                            actionType === 'APPROVE' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'
+                                        }`}
+                                    >
+                                        Confirm {actionType === 'APPROVE' ? 'Final Approval' : 'Rejection'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function StatCard({ title, value, icon, color }) {
+            const colorClasses = {
+                blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
+                amber: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
+                emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
+                rose: 'bg-rose-500/10 border-rose-500/20 text-rose-400',
+                purple: 'bg-purple-500/10 border-purple-500/20 text-purple-400',
+                indigo: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',
+                teal: 'bg-teal-500/10 border-teal-500/20 text-teal-400'
+            };
+
+            return (
+                <div className={`p-4 rounded-2xl border ${colorClasses[color]} transition-transform hover:-translate-y-0.5`}>
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-semibold text-slate-400">{title}</span>
+                        <i className={`fas ${icon} text-base`}></i>
+                    </div>
+                    <p className="text-2xl font-bold text-white">{value}</p>
+                </div>
+            );
+        }
+
+        function StatusBadge({ status }) {
+            if (status === 'APPROVED') {
+                return <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center"><i className="fas fa-check-circle mr-1"></i>Approved</span>;
+            }
+            if (status === 'REJECTED') {
+                return <span className="bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center"><i className="fas fa-times-circle mr-1"></i>Rejected</span>;
+            }
+            if (status === 'HOD_PENDING') {
+                return <span className="bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center"><i className="fas fa-clock mr-1"></i>HOD Pending</span>;
+            }
+            return <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center"><i className="fas fa-clock mr-1"></i>Faculty Pending</span>;
+        }
+
+        function LeaveTable({ leaves, showStudent = false, users = [] }) {
+            if (!leaves || leaves.length === 0) {
+                return <p className="text-xs text-slate-500 py-4 text-center">No leave records registered.</p>;
+            }
+
+            return (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                            <tr>
+                                <th className="p-3">App ID</th>
+                                {showStudent && <th className="p-3">Student</th>}
+                                <th className="p-3">Dates</th>
+                                <th className="p-3">Days</th>
+                                <th className="p-3">Type</th>
+                                <th className="p-3">Reason</th>
+                                <th className="p-3">Workflow Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                            {leaves.map(l => {
+                                const student = users.find(u => u.id === l.student_id);
+                                return (
+                                    <tr key={l.id} className="hover:bg-slate-800/30 transition-colors">
+                                        <td className="p-3 font-mono text-slate-400">#{l.id}</td>
+                                        {showStudent && (
+                                            <td className="p-3">
+                                                <p className="font-semibold text-slate-200">{student?.name || 'Student'}</p>
+                                                <p className="text-[10px] text-slate-500">{student?.student_id}</p>
+                                            </td>
+                                        )}
+                                        <td className="p-3 whitespace-nowrap">{l.from_date} to {l.to_date}</td>
+                                        <td className="p-3 font-semibold text-white">{l.number_of_days}</td>
+                                        <td className="p-3"><span className="bg-slate-800 px-2 py-0.5 rounded text-[10px]">{l.leave_type}</span></td>
+                                        <td className="p-3 max-w-xs truncate" title={l.reason}>{l.reason}</td>
+                                        <td className="p-3"><StatusBadge status={l.final_status} /></td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        }
+
+        function FacultyPendingTable({ leaves, users, onAction }) {
+            if (!leaves || leaves.length === 0) {
+                return <p className="text-xs text-slate-500 py-4 text-center">No leave applications currently awaiting faculty review.</p>;
+            }
+
+            return (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                            <tr>
+                                <th className="p-3">Student</th>
+                                <th className="p-3">Dates</th>
+                                <th className="p-3">Days</th>
+                                <th className="p-3">Type</th>
+                                <th className="p-3">Reason</th>
+                                <th className="p-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                            {leaves.map(l => {
+                                const student = users.find(u => u.id === l.student_id);
+                                return (
+                                    <tr key={l.id} className="hover:bg-slate-800/30 transition-colors">
+                                        <td className="p-3">
+                                            <p className="font-semibold text-slate-200">{student?.name || 'Alex Johnson'}</p>
+                                            <p className="text-[10px] font-mono text-slate-400">{student?.student_id || 'CS2026-089'}</p>
+                                        </td>
+                                        <td className="p-3 whitespace-nowrap">{l.from_date} to {l.to_date}</td>
+                                        <td className="p-3 font-semibold text-white">{l.number_of_days}</td>
+                                        <td className="p-3"><span className="bg-slate-800 px-2 py-0.5 rounded text-[10px]">{l.leave_type}</span></td>
+                                        <td className="p-3 max-w-xs truncate">{l.reason}</td>
+                                        <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                                            <button
+                                                onClick={() => onAction(l, 'APPROVE')}
+                                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-medium transition-colors"
+                                            >
+                                                Approve
+                                            </button>
+                                            <button
+                                                onClick={() => onAction(l, 'REJECT')}
+                                                className="bg-rose-600 hover:bg-rose-500 text-white px-2.5 py-1 rounded-lg font-medium transition-colors"
+                                            >
+                                                Reject
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        }
+
+        function HodPendingTable({ leaves, users, onAction }) {
+            if (!leaves || leaves.length === 0) {
+                return <p className="text-xs text-slate-500 py-4 text-center">No requests currently awaiting HOD final authorization.</p>;
+            }
+
+            return (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                            <tr>
+                                <th className="p-3">Student</th>
+                                <th className="p-3">Faculty Status</th>
+                                <th className="p-3">Dates</th>
+                                <th className="p-3">Days</th>
+                                <th className="p-3">Reason</th>
+                                <th className="p-3 text-right">Final Decision</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                            {leaves.map(l => {
+                                const student = users.find(u => u.id === l.student_id);
+                                return (
+                                    <tr key={l.id} className="hover:bg-slate-800/30 transition-colors">
+                                        <td className="p-3">
+                                            <p className="font-semibold text-slate-200">{student?.name || 'Alex Johnson'}</p>
+                                            <p className="text-[10px] font-mono text-slate-400">{student?.student_id || 'CS2026-089'}</p>
+                                        </td>
+                                        <td className="p-3">
+                                            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                                                Verified
+                                            </span>
+                                        </td>
+                                        <td className="p-3 whitespace-nowrap">{l.from_date} to {l.to_date}</td>
+                                        <td className="p-3 font-semibold text-white">{l.number_of_days}</td>
+                                        <td className="p-3 max-w-xs truncate">{l.reason}</td>
+                                        <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                                            <button
+                                                onClick={() => onAction(l, 'APPROVE')}
+                                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-medium transition-colors"
+                                            >
+                                                Final Approve
+                                            </button>
+                                            <button
+                                                onClick={() => onAction(l, 'REJECT')}
+                                                className="bg-rose-600 hover:bg-rose-500 text-white px-2.5 py-1 rounded-lg font-medium transition-colors"
+                                            >
+                                                Reject
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        }
+
+        function DatabaseInspector({ logs }) {
+            const [isOpen, setIsOpen] = useState(false);
+
+            return (
+                <div className="border-t border-slate-800 bg-slate-950">
+                    <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full py-2 px-4 flex justify-between items-center text-xs text-slate-400 hover:text-slate-200 bg-slate-900/80 transition-colors"
+                    >
+                        <span className="flex items-center space-x-2">
+                            <i className="fas fa-database text-indigo-400"></i>
+                            <span className="font-semibold font-mono">PostgreSQL Live Query Engine Inspector</span>
+                            <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded-full">{logs.length} Queries Handled</span>
+                        </span>
+                        <i className={`fas fa-chevron-${isOpen ? 'down' : 'up'}`}></i>
+                    </button>
+
+                    {isOpen && (
+                        <div className="h-48 overflow-y-auto p-4 font-mono text-[11px] bg-slate-950 text-slate-300 space-y-2 custom-scrollbar border-t border-slate-800">
+                            {logs.length === 0 ? (
+                                <p className="text-slate-600 italic">No SQL statements executed yet. Interact with portals to stream queries...</p>
+                            ) : (
+                                logs.map(log => (
+                                    <div key={log.id} className="p-2 rounded bg-slate-900 border border-slate-800/80">
+                                        <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                                            <span>[POSTGRES] Query Execution</span>
+                                            <span>{log.timestamp}</span>
+                                        </div>
+                                        <p className="text-emerald-400 font-semibold">{log.query}</p>
+                                        {log.params.length > 0 && (
+                                            <p className="text-slate-400 text-[10px] mt-0.5">
+                                                Parameters: <span className="text-amber-300">{JSON.stringify(log.params)}</span>
+                                            </p>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function ProjectCodeExplorer() {
+            const [selectedFile, setSelectedFile] = useState('README.md');
+
+            const files = {
+                'README.md': `# Student Leave Management System (SLMS)
+
+## Project Overview
+A production-grade, multi-tenant academic web application designed to digitize, streamline, and audit college leave applications across Students, Faculty, and Heads of Departments (HOD).
+
+## Workflow Architecture
+Student Submission -> Faculty Endorsement (FACULTY_PENDING) -> HOD Final Authorization (HOD_PENDING) -> Approved / Rejected
+
+## Tech Stack
+- Frontend: React.js, Tailwind CSS, Axios, Lucide/FontAwesome
+- Backend: Node.js, Express.js REST API
+- Security: JWT Tokens, bcrypt hashing, Role RBAC Middleware
+- Database: PostgreSQL Relational Database with Foreign Key constraints
+
+## Local Setup
+1. Setup PostgreSQL: \`psql -U postgres -f database/schema.sql\`
+2. Seed Initial Data: \`psql -U postgres -f database/seed.sql\`
+3. Run Backend: \`cd server && npm install && npm run dev\`
+4. Run Frontend: \`cd client && npm install && npm start\`
+
+## Demo Credentials
+- Student: student@example.com / password123
+- Faculty: faculty@example.com / password123
+- HOD: hod@example.com / password123`,
+
+                'schema.sql': `-- PostgreSQL Database Schema Definition
+
+DROP TABLE IF EXISTS leave_applications CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS departments CASCADE;
+
+CREATE TABLE departments (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(10) UNIQUE NOT NULL,
+    hod_id INT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(120) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('STUDENT', 'FACULTY', 'HOD')),
+    student_id VARCHAR(30) UNIQUE,
+    department_id INT REFERENCES departments(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE departments ADD CONSTRAINT fk_hod FOREIGN KEY (hod_id) REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE leave_applications (
+    id SERIAL PRIMARY KEY,
+    student_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    department_id INT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    from_date DATE NOT NULL,
+    to_date DATE NOT NULL,
+    number_of_days INT NOT NULL CHECK (number_of_days > 0),
+    leave_type VARCHAR(50) NOT NULL,
+    reason TEXT NOT NULL,
+    faculty_status VARCHAR(20) DEFAULT 'PENDING' CHECK (faculty_status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    faculty_comment TEXT,
+    faculty_action_at TIMESTAMP WITH TIME ZONE,
+    hod_status VARCHAR(20) DEFAULT 'PENDING' CHECK (hod_status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    hod_comment TEXT,
+    hod_action_at TIMESTAMP WITH TIME ZONE,
+    final_status VARCHAR(30) DEFAULT 'FACULTY_PENDING' CHECK (final_status IN ('FACULTY_PENDING', 'HOD_PENDING', 'APPROVED', 'REJECTED')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_dates CHECK (to_date >= from_date)
+);
+
+CREATE INDEX idx_leave_student ON leave_applications(student_id);
+CREATE INDEX idx_leave_dept ON leave_applications(department_id);
+CREATE INDEX idx_leave_status ON leave_applications(final_status);`,
+
+                'seed.sql': `-- Seed Script for Demo Environment
+
+INSERT INTO departments (id, name, code) VALUES
+(1, 'Computer Science & Engineering', 'CSE'),
+(2, 'Electronics & Communication', 'ECE');
+
+INSERT INTO users (id, name, email, password_hash, role, student_id, department_id) VALUES
+(1, 'Alex Johnson', 'student@example.com', '$2b$10$wT0vR2eO1b...', 'STUDENT', 'CS2026-089', 1),
+(2, 'Prof. Sarah Jenkins', 'faculty@example.com', '$2b$10$wT0vR2eO1b...', 'FACULTY', NULL, 1),
+(3, 'Dr. Robert Miller', 'hod@example.com', '$2b$10$wT0vR2eO1b...', 'HOD', NULL, 1);
+
+UPDATE departments SET hod_id = 3 WHERE id = 1;`,
+
+                'server/app.js': `const express = require('express');
+const cors = require('cors');
+const authRoutes = require('./routes/auth');
+const leaveRoutes = require('./routes/leaves');
+const facultyRoutes = require('./routes/faculty');
+const hodRoutes = require('./routes/hod');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/leaves', leaveRoutes);
+app.use('/api/faculty', facultyRoutes);
+app.use('/api/hod', hodRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));`,
+
+                'package.json': `{
+  "name": "student-leave-management-system",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "nodemon server/app.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3"
+  }
+}`
+            };
+
+            return (
+                <div className="flex-1 flex flex-col md:flex-row bg-slate-950 p-4 gap-4">
+                    {/* File Tree */}
+                    <div className="w-full md:w-64 bg-slate-900 border border-slate-800 rounded-2xl p-4 shrink-0">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Project Workspace</h3>
+                        <div className="space-y-1">
+                            {Object.keys(files).map(filename => (
+                                <button
+                                    key={filename}
+                                    onClick={() => setSelectedFile(filename)}
+                                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-mono transition-colors flex items-center space-x-2 ${
+                                        selectedFile === filename ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:bg-slate-800'
+                                    }`}
+                                >
+                                    <i className={`fas ${filename.endsWith('.sql') ? 'fa-database text-amber-400' : filename.endsWith('.md') ? 'fa-file-alt text-blue-400' : 'fa-code text-emerald-400'}`}></i>
+                                    <span className="truncate">{filename}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Code Display Area */}
+                    <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
+                            <span className="text-xs font-mono font-bold text-slate-200">{selectedFile}</span>
+                            <button
+                                onClick={() => {
+                                    document.execCommand('copy');
+                                    alert('Content copied to clipboard.');
+                                }}
+                                className="text-xs text-slate-400 hover:text-white bg-slate-800 px-3 py-1 rounded-lg"
+                            >
+                                <i className="fas fa-copy mr-1"></i> Copy Content
+                            </button>
+                        </div>
+                        <pre className="flex-1 overflow-auto font-mono text-xs text-emerald-400 bg-slate-950 p-4 rounded-xl border border-slate-800/80 leading-relaxed custom-scrollbar whitespace-pre-wrap">
+                            {files[selectedFile]}
+                        </pre>
+                    </div>
+                </div>
+            );
+        }
+
+        window.onload = function() {
+            ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        };
+    </script>
+</body>
+</html>
